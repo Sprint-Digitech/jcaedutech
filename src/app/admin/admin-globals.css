@@ -1,0 +1,25 @@
+:root {
+  --admin-bg: #f3f4f6;
+  --admin-text: #1f2937;
+  --admin-primary: #083D59;
+  --admin-secondary: #FFA84B;
+  --admin-card-bg: #ffffff;
+  --admin-border: #e5e7eb;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: Arial, sans-serif;
+  background-color: var(--admin-bg);
+  color: var(--admin-text);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+a {
+  text-decoration: none;
+  color: inherit;
+}
