@@ -12,8 +12,47 @@ if (typeof window !== 'undefined' && !window.__wpScriptWarningPatched) {
     if (typeof args[0] === 'string' && args[0].includes('Encountered a script tag while rendering React component')) {
       return;
     }
+    // WP plugin bundles (e.g. contact-form-7's index.js) call REST endpoints
+    // like /wp-json/contact-form-7/v1/contact-forms/<id>/refill that only
+    // exist on a real WordPress backend. This clone has none, so those
+    // fetches 404 and the vendor code logs the raw failed Response via
+    // console.error(response) - not a bug in this app, just a missing backend.
+    if (args.some((a) => typeof Response !== 'undefined' && a instanceof Response)) {
+      return;
+    }
     originalConsoleError.apply(console, args);
   };
+}
+
+// burst-statistics/endpoint.php and /wp-json/sliderrevolution/... only exist on
+// a real WordPress backend, which this static clone doesn't have. Letting the
+// browser actually attempt those requests logs a "Failed to load resource"
+// network error the console can't otherwise suppress. Short-circuit them
+// before they hit the network instead - the vendor code (burst's beacon,
+// RevSlider's cloud-thumbnail fetch) already handles a failed/empty response
+// gracefully.
+if (typeof window !== 'undefined' && !window.__wpNetworkPatched) {
+  window.__wpNetworkPatched = true;
+  const isStubbedUrl = (url) => typeof url === 'string' &&
+    (url.includes('/wp-content/plugins/burst-statistics/endpoint.php') ||
+     url.includes('/wp-json/sliderrevolution/'));
+
+  const originalFetch = window.fetch;
+  window.fetch = function (input, init) {
+    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    if (isStubbedUrl(url)) {
+      return Promise.resolve(new Response(null, { status: 204, statusText: 'No Content' }));
+    }
+    return originalFetch.call(this, input, init);
+  };
+
+  if (navigator.sendBeacon) {
+    const originalSendBeacon = navigator.sendBeacon.bind(navigator);
+    navigator.sendBeacon = function (url, data) {
+      if (isStubbedUrl(url)) return true;
+      return originalSendBeacon(url, data);
+    };
+  }
 }
 
 export default function ScriptRunner({ children }) {
@@ -24,7 +63,13 @@ export default function ScriptRunner({ children }) {
     const handleRejection = (event) => {
       if (event.reason) {
         if (event.reason.name === 'ChunkLoadError' ||
-            (event.reason.message && event.reason.message.includes('Failed to load CSS'))) {
+            (event.reason.message && event.reason.message.includes('Failed to load CSS')) ||
+            (typeof Response !== 'undefined' && event.reason instanceof Response) ||
+            // RevSlider's Slider Revolution "cloud" fetch (/wp-json/sliderrevolution/...)
+            // rejects with an Error whose message is literally the HTTP status text
+            // ("Not Found") when there's no real WP backend to serve it - same
+            // missing-backend category as the two checks above.
+            event.reason.message === 'Not Found') {
           event.preventDefault(); // Prevents the Next.js overlay
         }
       }
